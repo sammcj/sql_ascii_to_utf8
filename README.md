@@ -30,3 +30,15 @@ LOCATION:  exec_stmt_raise, pl_exec.c:3035
 
 * I'm fairly certainly this is not at all safe as it might break some XML etc...
 * It also completely rewrites the entire database so it's slow and massively impacts performance.
+
+
+Common characters I see in SQL_ASCII databases have the following bytecodes:
+
+```
+0xe9
+0x09
+0x39
+0xa3
+0x96
+0x92
+```
