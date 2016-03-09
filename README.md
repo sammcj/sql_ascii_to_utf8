@@ -1,7 +1,6 @@
 ## Evgeny's scripts
 
 - [Remove_non_UTF8_29022016.sql](Remove_non_UTF8_29022016.sql)
-- [Crosstab_query_set_29022016.sql](Crosstab_query_set_29022016.sql)
 
 ## Sam's dodgy scripts
 
