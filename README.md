@@ -1,10 +1,13 @@
 ## Evgeny's scripts
 
+This is the script that Evgeny, Ricardo and George are currently working on:
+
 - [Remove_non_UTF8_29022016.sql](Remove_non_UTF8_29022016.sql)
 
-## Sam's dodgy scripts
 
-#### Scripts for converting PostgreSQL SQL_ASCII databases with non-utf8 characters to UTF8
+### Sam's dodgy scripts
+
+These are some older scripts I was playing with for converting PostgreSQL SQL_ASCII databases with non-utf8 characters to UTF8
 
 This is currently a work in progress, don't use these in production (yet).
 
