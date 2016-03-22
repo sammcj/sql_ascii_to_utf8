@@ -2,7 +2,7 @@
 
 This is the script that Evgeny, Ricardo and George are currently working on:
 
-- [Remove_non_UTF8_29022016.sql](Remove_non_UTF8_29022016.sql)
+- [Replace_non_UTF8.sql](Replace_non_UTF8.sql)
 
 
 ### Sam's dodgy scripts
