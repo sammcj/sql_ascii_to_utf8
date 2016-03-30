@@ -5,32 +5,111 @@ CREATE OR REPLACE FUNCTION remove_non_utf8(p_string IN VARCHAR )
 $BODY$
 DECLARE
   v_string VARCHAR;
-  cur_part RECORD;
 BEGIN 
   v_string := p_string;
-  RAISE NOTICE 'running remove_non_utf8 (%...%)', left(p_string,5), right(p_string,5);
-  FOR cur_part IN ( SELECT
-                      p_string AS word, 
-                      SUBSTRING(p_string, numgen.num, 1) AS symbol, 
-                      numgen.num AS POS
-                    FROM ( SELECT GENERATE_SERIES AS num 
-					       FROM GENERATE_SERIES(1,(SELECT MAX(LENGTH(p_string)) AS slength))) AS numgen
-                    WHERE SUBSTRING(p_string, numgen.num, 1) IS NOT NULL  
-                      AND LENGTH(SUBSTRING(p_string, numgen.num, 1)) >= 1
-                      AND NOT    SUBSTRING(p_string, numgen.num, 1) ~ ( '^('||
-                                             $$[\09\0A\0D\x20-\x7E]|$$||               -- ASCII
-                                             $$[\xC2-\xDF][\x80-\xBF]|$$||             -- non-overlong 2-byte
-                                             $$\xE0[\xA0-\xBF][\x80-\xBF]|$$||        -- excluding overlongs
-                                             $$[\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}|$$||  -- straight 3-byte
-                                             $$\xED[\x80-\x9F][\x80-\xBF]|$$||        -- excluding surrogates
-                                             $$\xF0[\x90-\xBF][\x80-\xBF]{2}|$$||     -- planes 1-3
-                                             $$[\xF1-\xF3][\x80-\xBF]{3}|$$||          -- planes 4-15
-                                             $$\xF4[\x80-\x8F][\x80-\xBF]{2}$$||      -- plane 16
-                                             ')*$' )
-                    ORDER BY 3 DESC )
-   LOOP					
-     v_string := LEFT(v_string, cur_part.pos - 1)|| '_' || RIGHT(v_string, LENGTH(v_string) - cur_part.pos);
-   END LOOP;
+  RAISE NOTICE 'running remove_non_utf8 (%...%)', left(p_string,8), right(p_string,8);
+  -- xFE and xFF are not currently valid UTF8 for 1st or subsequent bytes
+  v_string := regexp_replace(v_string, 
+	E'[\xFE\xFF]' , '_' , 'g'); 
+
+  -- The following substitutions will not handle more that a one-off bad byte
+  -- They would need to be re-applied until v_string stops changing
+  -- They can be safely applied to any UTF8 test
+
+  -- RAISE NOTICE 'Fix UTF8 continuation byte 80-BF in text: %', v_string;
+
+  -- Catch single 80-BF - is not valid UTF8 on it's own
+  -- ( ASCII or UTF8 or empty )  0x80-0xBF  ( ASCII or 0xC0-0xFF )
+  v_string := regexp_replace(v_string, 
+	E'(^|[\x01-\x7F]|'                  -- ASCII or empty
+         '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
+         '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
+         '[\xF0-\xF7][\x80-\xBF]{3}|'       -- 4 byte UTF8
+         '[\xF8-\xFB][\x80-\xBF]{4}|'       -- 5 byte UTF8
+         '[\xFC-\xFD][\x80-\xBF]{5})'       -- 6 byte UTF8
+         '[\x80-\xBF]'                     -- replace 0x80-0xBF - not valid as 1st byte of UTF8 sequence,
+	 , '\1_' , 'g');
+
+  -- RAISE NOTICE 'Fix UTF8 2 byte C0-DF in text: %', v_string;
+
+  -- Broken 2-byte UTF8 C0-DF
+  -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
+  v_string := regexp_replace(v_string, 
+	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
+         '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
+         '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
+         '[\xF0-\xF7][\x80-\xBF]{3}|'       -- 4 byte UTF8
+         '[\xF8-\xFB][\x80-\xBF]{4}|'       -- 5 byte UTF8
+         '[\xFC-\xFD][\x80-\xBF]{5})'       -- 6 byte UTF8
+         '[\xC0-\xDF]([\x01-x7F\xC0-\xFF]|$)'   -- replace 0x80-0xBF - not valid as 1st byte of UTF8 sequence,
+                                                -- replace 0xC0-0xDF - only valid if followed by 0x80-0xBF
+	 , '\1_\2' , 'g');
+
+  -- RAISE NOTICE 'Fix UTF8 3 byte E0-EF in text: %', v_string;
+
+  -- Broken 3-byte UTF8 E0-EF
+  -- ( ASCII or UTF8 or empty )  0xE0-0xDF  ( ASCII or 0xC0-0xFF )
+  v_string := regexp_replace(v_string, 
+	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
+         '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
+         '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
+         '[\xF0-\xF7][\x80-\xBF]{3}|'       -- 4 byte UTF8
+         '[\xF8-\xFB][\x80-\xBF]{4}|'       -- 5 byte UTF8
+         '[\xFC-\xFD][\x80-\xBF]{5})'       -- 6 byte UTF8
+         '[\xE0-\xEF]([\x80-\xBF]{0,1}[\x01-x7F\xC0-\xFF]|$)'   -- replace 0xE0-0xEF if invalid UTF8 char
+	 , '\1_\2' , 'g');
+
+  -- RAISE NOTICE 'Fix UTF8 4 byte F0-F7 in text: %', v_string;
+
+  -- Broken 4-byte UTF8 F0-F7
+  -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
+  v_string := regexp_replace(v_string, 
+	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
+         '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
+         '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
+         '[\xF0-\xF7][\x80-\xBF]{3}|'       -- 4 byte UTF8
+         '[\xF8-\xFB][\x80-\xBF]{4}|'       -- 5 byte UTF8
+         '[\xFC-\xFD][\x80-\xBF]{5})'       -- 6 byte UTF8
+         '[\xF0-\xF7]([\x80-\xBF]{0,2}[\x01-x7F\xC0-\xFF]|$)'   -- replace 0xF0-0xF7 if invalid
+	 , '\1_\2' , 'g');
+
+  -- RAISE NOTICE 'Fix UTF8 5 byte F8-FB in text: %', v_string;
+
+  -- Broken 5-byte UTF8 F8-FB
+  -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
+  v_string := regexp_replace(v_string, 
+	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
+         '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
+         '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
+         '[\xF0-\xF7][\x80-\xBF]{3}|'       -- 4 byte UTF8
+         '[\xF8-\xFB][\x80-\xBF]{4}|'       -- 5 byte UTF8
+         '[\xFC-\xFD][\x80-\xBF]{5})'       -- 6 byte UTF8
+         '[\xF8-\xFB]([\x80-\xBF]{0,3}[\x01-x7F\xC0-\xFF]|$)'   -- replace 0xF8-0xFB if invalid
+	 , '\1_\2' , 'g');
+
+  -- RAISE NOTICE 'Fix UTF8 6 byte FC-FD in text: %', v_string;
+
+  -- Broken 6-byte UTF8 FC-FD
+  -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
+  v_string := regexp_replace(v_string, 
+	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
+         '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
+         '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
+         '[\xF0-\xF7][\x80-\xBF]{3}|'       -- 4 byte UTF8
+         '[\xF8-\xFB][\x80-\xBF]{4}|'       -- 5 byte UTF8
+         '[\xFC-\xFD][\x80-\xBF]{5})'       -- 6 byte UTF8
+         '[\xFC-\xFD]([\x80-\xBF]{0,2}[\x01-x7F\xC0-\xFF]|$)'   -- replace 0xFC-0xFD if invalid
+	 , '\1_\2' , 'g');
+
+-- Invalid sequences:
+-- ASCII  80-FF ASCII | C0-FF  -> excludes 80-BF 80-BF .... hmmm
+-- ASCII  C0-DF ASCII | C0-FF  -> exclude C0-DF  80-BF
+-- ASCII  E0-EF 80-BF {0,1} ASCII | C0-FF  -> exclude E0-EF  80-BF  80-BF
+-- ASCII  F0-F7 80-BF {0,2} ASCII | C0-FF  -> exclude F0-F7  80-BF  80-BF  80-BF
+-- ASCII  F8-FB 80-BF {0,3} ASCII | C0-FF  -> exclude F8-FB  80-BF  80-BF  80-BF  80-BF
+-- ASCII  FC-FD 80-BF {0,4} ASCII | C0-FF  -> exclude FC-FD  80-BF  80-BF  80-BF  80-BF  80-BF
+--  80-BF ? 
+
    RETURN v_string;
 END
 $BODY$  LANGUAGE plpgsql;
@@ -67,15 +146,17 @@ BEGIN
   FOR i_num IN 1..n_max_chunks
   LOOP
  
-      EXECUTE FORMAT ('ALTER TABLE %I DISABLE TRIGGER ALL',p_table_name);
-      RAISE NOTICE 'DISABLED TRIGGERS IN table: %		(column: %)', p_table_name, p_column_name;
+      -- EXECUTE FORMAT ('ALTER TABLE %I DISABLE TRIGGER ALL',p_table_name);
+      -- RAISE NOTICE 'DISABLED TRIGGERS IN table: %		(column: %) time: %', p_table_name, p_column_name, clock_timestamp();
+			RAISE NOTICE '%: table: %    (column: %) time: %', i_num, p_table_name, p_column_name, clock_timestamp();
       FOR ctid_row IN EXECUTE FORMAT('SELECT rid FROM x_list WHERE row_chunk = $1 AND NOT %I ~ $2', 'row_message') 
                 USING i_num, v_utf8_string_filter FOR UPDATE
       LOOP
         EXECUTE FORMAT('UPDATE %I SET %I = remove_non_utf8(%I) WHERE ctid = $1 AND %I ~ E''[\x80-\xFF]''', p_table_name, p_column_name, p_column_name, p_column_name) USING ctid_row.rid;
       END LOOP;
-      EXECUTE FORMAT ('ALTER TABLE %I ENABLE TRIGGER ALL',p_table_name);
-      RAISE NOTICE 'ENABLED  TRIGGERS IN table: %		(column: %)', p_table_name, p_column_name;
+      -- EXECUTE FORMAT ('ALTER TABLE %I ENABLE TRIGGER ALL',p_table_name);
+      -- RAISE NOTICE 'ENABLED  TRIGGERS IN table: %		(column: %) time: %', p_table_name, p_column_name, clock_timestamp();
+			RAISE NOTICE '%: table: %    (column: %) time: %', i_num, p_table_name, p_column_name, clock_timestamp();
 
   END LOOP;
 
@@ -99,8 +180,9 @@ BEGIN
   LOOP   
     EXECUTE FORMAT('SELECT count(*) FROM %I', cur_column.table_name ) INTO num_rows;
     IF ( num_rows > 0 ) THEN
-      RAISE NOTICE 'Processing table: %  	column: %', cur_column.table_name, cur_column.column_name;
+      RAISE NOTICE 'Processing table: %  	column: %		time: %', cur_column.table_name, cur_column.column_name, clock_timestamp();
       PERFORM process_non_utf8_at_column(cur_column.table_name, cur_column.column_name); 
+      RAISE NOTICE 'return from function time: %', clock_timestamp();
     ELSE
       RAISE NOTICE 'Processing table: %  	(empty table skipping)', cur_column.table_name;
     END IF;
@@ -119,7 +201,6 @@ CREATE OR REPLACE FUNCTION search_columns(
     haystack_tables name[] default '{}',
     haystack_schema name[] default '{public}'
 )
---RETURNS table(schemaname text, tablename text, columnname text, rowctid text)
 RETURNS table(schemaname text, tablename text, columnname text, hits integer)
 AS $BODY$
 begin
@@ -133,9 +214,7 @@ begin
         AND t.table_type='BASE TABLE'
         AND (data_type  LIKE 'character%' OR data_type LIKE 'text%' OR data_type LIKE 'varchar%')
   LOOP
-    -- EXECUTE format('SELECT ctid FROM %I.%I WHERE cast(%I as text)=%L',
-    -- EXECUTE format('SELECT ctid FROM %I.%I WHERE cast(%I as text) LIKE ''%%'' || convert_from(BYTEA ''\xC7'', ''LATIN1'') || ''%%''',
-		RAISE NOTICE 'schema: %   table: %   column: %', schemaname, tablename, columnname;
+		RAISE NOTICE 'schema: %		table: %		column: %		time: %', schemaname, tablename, columnname, clock_timestamp();
     EXECUTE format('SELECT count(*) FROM %I.%I WHERE cast(%I as text) ~  E''[\x80-\xFF]'' LIMIT 1',
        schemaname,
        tablename,
