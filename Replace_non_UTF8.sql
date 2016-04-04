@@ -1,13 +1,15 @@
 -- SELECT remove_non_utf8(column6_text) FROM table101;
 
-CREATE OR REPLACE FUNCTION remove_non_utf8(p_string IN VARCHAR )
+CREATE OR REPLACE FUNCTION remove_non_utf8(p_string IN VARCHAR, show_arg IN boolean DEFAULT true )
   RETURNS character varying AS
 $BODY$
 DECLARE
   v_string VARCHAR;
 BEGIN 
   v_string := p_string;
-  RAISE NOTICE 'running remove_non_utf8 (%...%)', left(p_string,8), right(p_string,8);
+  IF show_arg THEN
+     RAISE INFO 'running remove_non_utf8 (%...%)', left(v_string,8), right(v_string,8);
+  END IF;
   -- xFE and xFF are not currently valid UTF8 for 1st or subsequent bytes
   v_string := regexp_replace(v_string, 
 	E'[\xFE\xFF]' , '_' , 'g'); 
@@ -146,17 +148,13 @@ BEGIN
   FOR i_num IN 1..n_max_chunks
   LOOP
  
-      -- EXECUTE FORMAT ('ALTER TABLE %I DISABLE TRIGGER ALL',p_table_name);
-      -- RAISE NOTICE 'DISABLED TRIGGERS IN table: %		(column: %) time: %', p_table_name, p_column_name, clock_timestamp();
-			RAISE NOTICE '%: table: %    (column: %) time: %', i_num, p_table_name, p_column_name, clock_timestamp();
+      RAISE NOTICE '%: table: %    (column: %) time: %', i_num, p_table_name, p_column_name, clock_timestamp();
       FOR ctid_row IN EXECUTE FORMAT('SELECT rid FROM x_list WHERE row_chunk = $1 AND NOT %I ~ $2', 'row_message') 
                 USING i_num, v_utf8_string_filter FOR UPDATE
       LOOP
-        EXECUTE FORMAT('UPDATE %I SET %I = remove_non_utf8(%I) WHERE ctid = $1 AND %I ~ E''[\x80-\xFF]''', p_table_name, p_column_name, p_column_name, p_column_name) USING ctid_row.rid;
+        EXECUTE FORMAT('UPDATE %I SET %I = remove_non_utf8(cast(%I as text),true) WHERE ctid = $1 AND %I ~ E''[\x80-\xFF]'' AND cast(%I as text) != remove_non_utf8(cast(%I as text),false)', p_table_name, p_column_name, p_column_name, p_column_name, p_column_name, p_column_name) USING ctid_row.rid;
       END LOOP;
-      -- EXECUTE FORMAT ('ALTER TABLE %I ENABLE TRIGGER ALL',p_table_name);
-      -- RAISE NOTICE 'ENABLED  TRIGGERS IN table: %		(column: %) time: %', p_table_name, p_column_name, clock_timestamp();
-			RAISE NOTICE '%: table: %    (column: %) time: %', i_num, p_table_name, p_column_name, clock_timestamp();
+      RAISE NOTICE '%: table: %    (column: %) time: %', i_num, p_table_name, p_column_name, clock_timestamp();
 
   END LOOP;
 
@@ -194,32 +192,35 @@ $BODY$  LANGUAGE plpgsql;
 --
 -- The following function seeks out the offending schema/table/column/row and returns these as a table
 --
-DROP FUNCTION IF EXISTS search_columns(needle text, haystack_tables name[], haystack_schema name[]);
+DROP FUNCTION IF EXISTS search_for_non_utf8_columns(search_tables name[], search_schema name[], show_timestamps boolean);
 
-CREATE OR REPLACE FUNCTION search_columns(
-    needle text,
-    haystack_tables name[] default '{}',
-    haystack_schema name[] default '{public}'
+CREATE OR REPLACE FUNCTION search_for_non_utf8_columns(
+    search_tables name[] default '{}',
+    search_schema name[] default '{public}',
+    show_timestamps boolean default true
 )
 RETURNS table(schemaname text, tablename text, columnname text, hits integer)
 AS $BODY$
-begin
+BEGIN
   FOR schemaname,tablename,columnname IN
       SELECT c.table_schema,c.table_name,c.column_name
       FROM information_schema.columns c
       JOIN information_schema.tables t ON
         (t.table_name=c.table_name AND t.table_schema=c.table_schema)
-      WHERE (c.table_name=ANY(haystack_tables) OR haystack_tables='{}')
-        AND c.table_schema=ANY(haystack_schema)
+      WHERE (c.table_name=ANY(search_tables) OR search_tables='{}')
+        AND c.table_schema=ANY(search_schema)
         AND t.table_type='BASE TABLE'
         AND (data_type  LIKE 'character%' OR data_type LIKE 'text%' OR data_type LIKE 'varchar%')
   LOOP
-		RAISE NOTICE 'schema: %		table: %		column: %		time: %', schemaname, tablename, columnname, clock_timestamp();
-    EXECUTE format('SELECT count(*) FROM %I.%I WHERE cast(%I as text) ~  E''[\x80-\xFF]'' LIMIT 1',
+    IF show_timestamps THEN
+      RAISE INFO 'schema: %		table: %		column: %		time: %', schemaname, tablename, columnname, clock_timestamp();
+    END IF;
+    EXECUTE format('SELECT count(*) FROM %I.%I WHERE cast(%I as text) ~  E''[\x80-\xFF]'' AND cast(%I as text) != remove_non_utf8(cast(%I as text),false)',
        schemaname,
        tablename,
        columnname,
-       needle
+       columnname,
+       columnname
     ) INTO hits;
     IF hits > 0 THEN
       RETURN NEXT;
