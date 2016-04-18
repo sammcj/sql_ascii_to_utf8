@@ -5,24 +5,31 @@ CREATE OR REPLACE FUNCTION remove_non_utf8(p_string IN VARCHAR, show_arg IN bool
 $BODY$
 DECLARE
   v_string VARCHAR;
+  last_string VARCHAR;
 BEGIN 
   v_string := p_string;
+  last_string := '';
   IF show_arg THEN
      RAISE INFO 'running remove_non_utf8 (%...%)', left(v_string,8), right(v_string,8);
   END IF;
-  -- xFE and xFF are not currently valid UTF8 for 1st or subsequent bytes
-  v_string := regexp_replace(v_string, 
+
+  WHILE last_string != v_string LOOP
+
+    last_string := v_string;
+
+    -- xFE and xFF are not currently valid UTF8 for 1st or subsequent bytes
+    v_string := regexp_replace(v_string, 
 	E'[\xFE\xFF]' , '_' , 'g'); 
 
-  -- The following substitutions will not handle more that a one-off bad byte
-  -- They would need to be re-applied until v_string stops changing
-  -- They can be safely applied to any UTF8 test
+    -- The following substitutions will not handle more that a one-off bad byte
+    -- They would need to be re-applied until v_string stops changing
+    -- They can be safely applied to any UTF8 test
 
-  -- RAISE NOTICE 'Fix UTF8 continuation byte 80-BF in text: %', v_string;
+    -- RAISE NOTICE 'Fix UTF8 continuation byte 80-BF in text: %', v_string;
 
-  -- Catch single 80-BF - is not valid UTF8 on it's own
-  -- ( ASCII or UTF8 or empty )  0x80-0xBF  ( ASCII or 0xC0-0xFF )
-  v_string := regexp_replace(v_string, 
+    -- Catch single 80-BF - is not valid UTF8 on it's own
+    -- ( ASCII or UTF8 or empty )  0x80-0xBF  ( ASCII or 0xC0-0xFF )
+    v_string := regexp_replace(v_string, 
 	E'(^|[\x01-\x7F]|'                  -- ASCII or empty
          '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
          '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
@@ -32,11 +39,11 @@ BEGIN
          '[\x80-\xBF]'                     -- replace 0x80-0xBF - not valid as 1st byte of UTF8 sequence,
 	 , '\1_' , 'g');
 
-  -- RAISE NOTICE 'Fix UTF8 2 byte C0-DF in text: %', v_string;
+    -- RAISE NOTICE 'Fix UTF8 2 byte C0-DF in text: %', v_string;
 
-  -- Broken 2-byte UTF8 C0-DF
-  -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
-  v_string := regexp_replace(v_string, 
+    -- Broken 2-byte UTF8 C0-DF
+    -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
+    v_string := regexp_replace(v_string, 
 	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
          '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
          '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
@@ -47,11 +54,11 @@ BEGIN
                                                 -- replace 0xC0-0xDF - only valid if followed by 0x80-0xBF
 	 , '\1_\2' , 'g');
 
-  -- RAISE NOTICE 'Fix UTF8 3 byte E0-EF in text: %', v_string;
+    -- RAISE NOTICE 'Fix UTF8 3 byte E0-EF in text: %', v_string;
 
-  -- Broken 3-byte UTF8 E0-EF
-  -- ( ASCII or UTF8 or empty )  0xE0-0xDF  ( ASCII or 0xC0-0xFF )
-  v_string := regexp_replace(v_string, 
+    -- Broken 3-byte UTF8 E0-EF
+    -- ( ASCII or UTF8 or empty )  0xE0-0xDF  ( ASCII or 0xC0-0xFF )
+    v_string := regexp_replace(v_string, 
 	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
          '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
          '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
@@ -61,11 +68,11 @@ BEGIN
          '[\xE0-\xEF]([\x80-\xBF]{0,1}[\x01-x7F\xC0-\xFF]|$)'   -- replace 0xE0-0xEF if invalid UTF8 char
 	 , '\1_\2' , 'g');
 
-  -- RAISE NOTICE 'Fix UTF8 4 byte F0-F7 in text: %', v_string;
+    -- RAISE NOTICE 'Fix UTF8 4 byte F0-F7 in text: %', v_string;
 
-  -- Broken 4-byte UTF8 F0-F7
-  -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
-  v_string := regexp_replace(v_string, 
+    -- Broken 4-byte UTF8 F0-F7
+    -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
+    v_string := regexp_replace(v_string, 
 	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
          '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
          '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
@@ -75,11 +82,11 @@ BEGIN
          '[\xF0-\xF7]([\x80-\xBF]{0,2}[\x01-x7F\xC0-\xFF]|$)'   -- replace 0xF0-0xF7 if invalid
 	 , '\1_\2' , 'g');
 
-  -- RAISE NOTICE 'Fix UTF8 5 byte F8-FB in text: %', v_string;
+    -- RAISE NOTICE 'Fix UTF8 5 byte F8-FB in text: %', v_string;
 
-  -- Broken 5-byte UTF8 F8-FB
-  -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
-  v_string := regexp_replace(v_string, 
+    -- Broken 5-byte UTF8 F8-FB
+    -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
+    v_string := regexp_replace(v_string, 
 	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
          '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
          '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
@@ -89,11 +96,11 @@ BEGIN
          '[\xF8-\xFB]([\x80-\xBF]{0,3}[\x01-x7F\xC0-\xFF]|$)'   -- replace 0xF8-0xFB if invalid
 	 , '\1_\2' , 'g');
 
-  -- RAISE NOTICE 'Fix UTF8 6 byte FC-FD in text: %', v_string;
+    -- RAISE NOTICE 'Fix UTF8 6 byte FC-FD in text: %', v_string;
 
-  -- Broken 6-byte UTF8 FC-FD
-  -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
-  v_string := regexp_replace(v_string, 
+    -- Broken 6-byte UTF8 FC-FD
+    -- ( ASCII or UTF8 or empty )  0x80-0xDF  ( ASCII or 0xC0-0xFF )
+    v_string := regexp_replace(v_string, 
 	E'(^|[\x01-\x7F]|'                   -- ASCII or empty
          '[\xC0-\xDF][\x80-\xBF]|'          -- 2 byte UTF8
          '[\xE0-\xEF][\x80-\xBF]{2}|'       -- 3 byte UTF8
@@ -112,7 +119,10 @@ BEGIN
 -- ASCII  FC-FD 80-BF {0,4} ASCII | C0-FF  -> exclude FC-FD  80-BF  80-BF  80-BF  80-BF  80-BF
 --  80-BF ? 
 
-   RETURN v_string;
+  END LOOP; -- last_string != v_string
+
+  RETURN v_string;
+
 END
 $BODY$  LANGUAGE plpgsql;
 
@@ -192,7 +202,7 @@ $BODY$  LANGUAGE plpgsql;
 --
 -- The following function seeks out the offending schema/table/column/row and returns these as a table
 --
-DROP FUNCTION IF EXISTS search_for_non_utf8_columns(search_tables name[], search_schema name[], show_timestamps boolean);
+-- DROP FUNCTION IF EXISTS search_for_non_utf8_columns(search_tables name[], search_schema name[], show_timestamps boolean);
 
 CREATE OR REPLACE FUNCTION search_for_non_utf8_columns(
     search_tables name[] default '{}',

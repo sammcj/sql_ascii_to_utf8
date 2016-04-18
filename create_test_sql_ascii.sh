@@ -37,9 +37,9 @@ esac
 sudo -u postgres psql -e -p $PORT "$DB" <<EOF
 
 CREATE TABLE table101 (
-		chardecimal	integer,
+		rownum	integer,
 		description	character varying(2500),
-		column6_text	text
+		non_utf8_text	text
 );
 
 CREATE TABLE empty_table (
@@ -61,12 +61,12 @@ fi
 for NH in $CHAR_LIST; do
 
 	N=`printf '%d' 0x$NH`
-	printf "INSERT INTO table101 (chardecimal,description,column6_text) VALUES (%3d,'CHAR 0x%2X','$NH-> \x$NH \x$NH\x$NH <- -\xC2\xBD\x$NH\xC2\xBD-');\n" $N $N | \
+	printf "INSERT INTO table101 (rownum,description,non_utf8_text) VALUES (%3d,'CHAR 0x%2X','$NH-> \x$NH \x$NH\x$NH\x$NH <- -\xC2\xBD\x$NH\xC2\xBD-');\n" $N $N | \
 		sudo -u postgres psql -e -p $PORT "$DB"
 done
 
 cat <<EOF | sudo -u postgres psql -e -p $PORT "$DB"
-COPY table101 (chardecimal, description, column6_text) FROM stdin;
+COPY table101 (rownum, description, non_utf8_text) FROM stdin;
 999	This is a very long piece of text intented to take this column over the 250 char size, This is a very long piece of text intented to take this column over the 250 char size, This is a very long piece of text intented to take this column over the 250 char size, This is a very long piece of text intented to take this column over the 250 char size, This is a very long piece of text intented to take this column over the 250 char size, This is a very long piece of text intented to take this column over the 250 char size	\xFF
 000	Exclude this line - no remove_non_utf8() call	plain text
 500	This is an ordinary line of text, no changes expected	plain text
