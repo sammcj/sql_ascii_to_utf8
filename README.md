@@ -1,5 +1,5 @@
 Find and Replace non-UTF8 characters in a Postgresql SQL_ASCII database
------------------------------------------------------------------------
+=======================================================================
 
 This respository contains the following files:
 
@@ -12,12 +12,12 @@ This respository contains the following files:
 Applogies for the haphazard naming of these files and functions, but it works.
 
 The Goal
-========
+--------
 
 To be able to take a Postgres Database which is in SQL_ASCII encoding, and import it into a UTF8 encoded database.
 
 The Problem
-===========
+-----------
 Postresql will generate errors like this if it encounters any non-UTF8 byte-sequences during a database restore:
 ```
 # pg_dump -Fc test_badchar | pg_restore -d test_badchar_utf8
@@ -38,7 +38,7 @@ And the corresponding data will be omitted from the database (in this case, the 
 ```
 
 The Solution
-============
+------------
 
 To find and replace characters in an SQL_ASCII encoded database which do not conform to the UTF8 encoding requirements.
 
@@ -70,14 +70,14 @@ Not all values from 80-FF are covered by this script. Please add your own transl
 Any byte without a specific translation will be replaced with an underscore.
 
 The Triggers Problem
-====================
+--------------------
 The functions process_non_utf8_at_column() process_non_utf8_at_schema() work just fine, BUT if there are any 'triggers' on the rows being updated, these triggers are also invoked.
 Such triggers may expect a specific set of fields to be updated together, or increment sequence numbers.
 
 Running these triggers would be an undesirable side-effect of what should be a simple text-update.
 
 The Locking Problem
-===================
+-------------------
 The original solution was designed to minimise downtime, and these scripts would be ineffective if they were to lock table for anything more than a couple of seconds.
 
 Unfortunately, this is exactly what happens if triggers are diabled per-table while updating the text like this:
@@ -90,7 +90,7 @@ ALTER TABLE _some_table_ ENABLE TRIGGER ALL;
 Postgres wraps it all in a transaction, and locks the table until the update is complete (which can be minutes on a large table).
 
 The Non-Locking, Non-Triggering Solution
-========================================
+----------------------------------------
 
 a) Don't use `ALTER TABLE _some_table_ DISABLE TRIGGER ALL;`
    Instead, use a session-based setting:
@@ -107,7 +107,7 @@ The following script does a search for offending table,column combinations, and 
 
 
 Sample DB and Outputs
-=====================
+---------------------
 A test database can be created using the script:
 - [create_test_sql_ascii.sh](create_test_sql_ascii.sh)
 
